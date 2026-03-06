@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Xtreme • Dashboard Partes (Google Sheets)</title>
+<style>
+:root{--xtreme:#d9232d;--bg:#f2f4f7;--card:#fff;--ink:#111827;--muted:#6b7280;--line:#e5e7eb;}
+*{box-sizing:border-box} body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--ink)}
+header{background:#111;color:#fff;border-bottom:3px solid var(--xtreme);padding:12px 14px;display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+header b{font-size:14px} header .small{font-size:12px;color:#d1d5db}
+.wrap{max-width:1200px;margin:12px auto;padding:0 12px 40px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:0 6px 18px rgba(0,0,0,.06);margin:12px 0}
+.card h3{margin:0;padding:12px;border-bottom:1px solid var(--line);font-size:14px}
+.card .body{padding:12px}
+.row{display:grid;grid-template-columns:1fr;gap:10px}
+@media(min-width:900px){.row{grid-template-columns:1fr 1fr 1fr 1fr}}
+input,select{width:100%;padding:9px 10px;border:1px solid #d1d5db;border-radius:10px;font-size:14px;background:#fff}
+button{border:0;border-radius:10px;padding:10px 12px;background:#111827;color:#fff;font-weight:800;cursor:pointer}
+button.secondary{background:#374151}
+.tableWrap{overflow:auto;border:1px solid var(--line);border-radius:12px;background:#fff}
+table{border-collapse:collapse;width:100%;min-width:980px}
+th,td{border:1px solid #e5e7eb;padding:6px 8px;font-size:12px;vertical-align:top}
+th{background:#fafafa;color:#374151}
+.tag{display:inline-block;padding:2px 8px;border-radius:999px;background:#111827;color:#fff;font-weight:800;font-size:11px}
+.bars{display:grid;gap:8px}
+.barRow{display:flex;gap:10px;align-items:center}
+.barLbl{width:56px;font-weight:900}
+.barTrack{flex:1;height:14px;border-radius:999px;background:#eef2f7;overflow:hidden;border:1px solid #e5e7eb}
+.barFill{height:100%;background:#111827;width:0%}
+.barVal{width:44px;text-align:right;font-weight:900}
+.small{font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <b>Xtreme • Dashboard Partes (Google Sheets)</b><div class="small">Filtra por fecha/turno/equipo y revisa KPI sumados</div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <span id="status" class="tag">Sin cargar</span>
+    <button class="secondary" id="btnRefresh">Actualizar</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <h3>Conexión</h3>
+    <div class="body">
+      <div class="row">
+        <div>
+          <label class="small">URL Web App (Apps Script) /exec</label>
+          <input id="url" placeholder="https://script.google.com/macros/s/AKfycbyyBC-PHb1DRILDoJNB1FD62LKyeZaVpyM0bKrrZR-eIvwRxyEIeHiY_-e1NIlApYaEnQ/exec" />
+        </div>
+        <div>
+          <label class="small">Desde</label>
+          <input id="from" type="date"/>
+        </div>
+        <div>
+          <label class="small">Hasta</label>
+          <input id="to" type="date"/>
+        </div>
+        <div>
+          <label class="small">Turno</label>
+          <select id="turno">
+            <option value="">Todos</option>
+            <option value="A">A</option>
+            <option value="B">B</option>
+          </select>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <div>
+          <label class="small">Equipo contiene</label>
+          <input id="equipoLike" placeholder="Ej: JUMBO / MAT-474 / LHD" />
+        </div>
+        <div>
+          <label class="small">Límite</label>
+          <input id="limit" type="number" value="200" min="1" max="2000"/>
+        </div>
+        <div style="display:flex;align-items:end;gap:10px">
+          <button id="btnLoad">Cargar registros</button>
+          <button class="secondary" id="btnClear">Limpiar</button>
+        </div>
+      </div>
+      <p class="small">Este dashboard lee desde Sheets vía Apps Script (doGet). No modifica datos.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Sumatoria KPI (filtro actual)</h3>
+    <div class="body">
+      <div id="bars" class="bars"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Registros</h3>
+    <div class="body">
+      <div class="tableWrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Fecha</th><th>Turno</th><th>Equipo</th><th>Faena</th><th>Operador</th>
+              <th>Horómetro Motor</th><th>Estado</th><th>Novedades</th><th>KPI (HH)</th>
+            </tr>
+          </thead>
+          <tbody id="tb"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const KPI_ORDER=["HEF","BNF","HR","DP","DNP","HMF","FSO","SOP","ESM"];
+const $=id=>document.getElementById(id);
+const URL_KEY = "XTREME_WEBAPP_URL";
+function setStatus(t){ $("status").textContent=t; }
+
+function ymd(d){ const p=n=>String(n).padStart(2,"0"); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
+(function initDates(){
+  const d=new Date(); $("to").value=ymd(d);
+  const d2=new Date(d); d2.setDate(d2.getDate()-7); $("from").value=ymd(d2);
+})();
+
+// Prefill URL desde localStorage (misma clave que usa el parte)
+(function initUrl(){
+  const saved = (localStorage.getItem(URL_KEY)||"").trim();
+  if(saved) $("url").value = saved;
+})();
+
+function makeBars(totals){
+  const box=$("bars"); box.innerHTML="";
+  const max=Math.max(1,...KPI_ORDER.map(k=>totals[k]||0));
+  KPI_ORDER.forEach(k=>{
+    const v=totals[k]||0;
+    const pct=Math.round((v/max)*100);
+    const row=document.createElement("div");
+    row.className="barRow";
+    row.innerHTML=`<div class="barLbl">${k}</div><div class="barTrack"><div class="barFill" style="width:${pct}%"></div></div><div class="barVal">${v}</div>`;
+    box.appendChild(row);
+  });
+}
+
+function sumTotals(records){
+  const totals={}; KPI_ORDER.forEach(k=>totals[k]=0);
+  records.forEach(r=>{
+    const obj = r.kpiSums || r.kpiTotals || {};
+    KPI_ORDER.forEach(k=>{ totals[k]+= Number(obj[k]||0); });
+  });
+  return totals;
+}
+
+function rowHtml(r){
+  const hm = `${r.hMotorIni||"—"} → ${r.hMotorFin||"—"}`;
+  const kpi = KPI_ORDER.map(k=>`${k}:${Number((r.kpiSums||r.kpiTotals||{})[k]||0)}`).join(" | ");
+  const eq = r.idEquipo ? `${r.idEquipo} (${r.equipoTipo||""})` : (r.equipoTipo||"");
+  return `<tr>
+    <td>${r.fecha||""}</td>
+    <td>${r.turno||""}</td>
+    <td>${eq}</td>
+    <td>${r.faena||""}</td>
+    <td>${r.operador||""}</td>
+    <td>${hm}</td>
+    <td>${r.estadoOper||""}</td>
+    <td>${(r.novedades||"").replaceAll("<","&lt;").replaceAll(">","&gt;")}</td>
+    <td>${kpi}</td>
+  </tr>`;
+}
+
+async function loadData(){
+  const url=$("url").value.trim();
+  if(!url){ alert("Pega la URL /exec del Apps Script."); return; }
+
+  // Guardar para próximas cargas (y para compartir con el Parte)
+  localStorage.setItem(URL_KEY, url);
+  const params=new URLSearchParams({
+    action:"list",
+    from:$("from").value,
+    to:$("to").value,
+    turno:$("turno").value,
+    equipoLike:$("equipoLike").value,
+    limit:$("limit").value || "200"
+  });
+  setStatus("Cargando…");
+  const res = await fetch(url + "?" + params.toString(), {method:"GET"});
+  const out = await res.json();
+  const records = out.records || [];
+  $("tb").innerHTML = records.map(rowHtml).join("");
+  makeBars(sumTotals(records));
+  setStatus("OK ("+records.length+")");
+}
+
+$("btnLoad").onclick=loadData;
+$("btnRefresh").onclick=loadData;
+$("btnClear").onclick=()=>{ $("tb").innerHTML=""; $("bars").innerHTML=""; setStatus("Limpio"); };
+</script>
+</body>
+</html>
